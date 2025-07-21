@@ -1,5 +1,7 @@
+const cheerio = require("cheerio");
 const express = require("express");
 const yts = require("yt-search");
+const axios = require("axios");
 const ytdl = require("@distube/ytdl-core");
 
 const app = express();
@@ -25,23 +27,48 @@ app.get("/search", async (req, res) => {
 
 // Get direct stream URL using ytdl-core
 app.get("/api/ytdl", async (req, res) => {
-  const videoUrl = req.query.url;
-  if (!videoUrl) {
-    return res.status(400).json({ error: "Missing 'url' query parameter" });
+  const videoURL = req.query.url;
+
+  if (!videoURL) {
+    return res
+      .status(400)
+      .json({ error: "Missing YouTube URL in 'url' query parameter" });
   }
 
   try {
-    const info = await ytdl.getInfo(videoUrl);
-    const firstFormat = info.formats.find((f) => f.url);
+    const response = await axios.post(
+      "https://ssyoutube.online/yt-video-detail/",
+      new URLSearchParams({ videoURL }),
+      {
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "user-agent": "Mozilla/5.0",
+          referer: "https://ssyoutube.online/",
+          cookie: "pll_language=en",
+        },
+      }
+    );
 
-    if (!firstFormat?.url) {
-      return res.status(404).json({ error: "No downloadable URL found." });
-    }
+    const $ = cheerio.load(response.data);
+    const results = [];
 
-    res.json({ url: firstFormat.url });
-  } catch (error) {
-    console.error("Failed to fetch video info:", error);
-    res.status(500).json({ error: "Failed to fetch video info." });
+    $("tbody tr").each((_, el) => {
+      const qualityRaw = $(el).find("td").first().text().trim();
+      const quality = qualityRaw.replace(/\s+/g, " ");
+      const size = $(el).find("td").eq(1).text().trim();
+      const url = $(el).find("button").attr("data-url");
+
+      if (url) {
+        results.push({ quality, size, url });
+      }
+    });
+
+    res.json({ result: true, data: results });
+  } catch (err) {
+    console.error("Error:", err.message);
+    res
+      .status(500)
+      .json({ result: false, error: "Failed to fetch download links" });
   }
 });
 
